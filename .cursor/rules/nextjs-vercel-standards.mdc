@@ -1,0 +1,1099 @@
+---
+description: Next.js 15 + Vercel development standards for high-quality web applications
+globs: ["**/*.tsx", "**/*.ts", "**/*.jsx", "**/*.js", "**/next.config.*", "**/middleware.ts"]
+alwaysApply: false
+---
+
+# Next.js 15 + Vercel Development Standards
+
+**Context**: Building modern web applications with Next.js 15+ (App Router) deployed on Vercel.
+
+## Core Principles
+
+1. **App Router Only** - Never use Pages Router for new projects
+2. **Server Components by Default** - Only use Client Components when necessary
+3. **TypeScript Strict** - Full type safety, no `any` types
+4. **Performance First** - Every decision impacts Core Web Vitals
+5. **Static When Possible** - Maximize SSG/ISR to minimize costs
+6. **SEO Native** - Metadata and structure built-in from start
+7. **Accessibility Required** - WCAG AA compliance non-negotiable
+
+## Project Structure
+
+### Recommended Directory Layout
+
+```
+app/
+├── (marketing)/           # Route group for public pages
+│   ├── page.tsx           # Homepage (/)
+│   ├── about/             # About page
+│   ├── pricing/           # Pricing page
+│   └── layout.tsx         # Marketing layout
+├── (app)/                 # Route group for authenticated app
+│   ├── dashboard/         # Dashboard pages
+│   ├── settings/          # Settings pages
+│   └── layout.tsx         # App layout with auth
+├── api/                   # API routes (use sparingly)
+│   └── [...]/route.ts     # API endpoints
+├── layout.tsx             # Root layout
+├── globals.css            # Global styles
+├── not-found.tsx          # Custom 404
+├── error.tsx              # Error boundary
+├── loading.tsx            # Loading UI
+└── sitemap.ts             # Dynamic sitemap
+
+components/
+├── ui/                    # Base UI components (shadcn/ui)
+├── layout/                # Layout components (Header, Footer)
+├── features/              # Feature-specific components
+└── shared/                # Shared components
+
+lib/
+├── utils.ts               # Utility functions
+├── db.ts                  # Database client
+├── api.ts                 # API client
+└── validations.ts         # Zod schemas
+
+public/
+├── images/                # Static images
+├── fonts/                 # Static fonts (prefer next/font)
+└── favicon.ico            # Favicon
+
+types/
+└── index.ts               # Shared TypeScript types
+```
+
+## TypeScript Conventions
+
+### Strict Configuration
+
+```typescript
+// tsconfig.json
+{
+  "compilerOptions": {
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true
+  }
+}
+```
+
+### Component Types
+
+**Server Components (Default):**
+```typescript
+// No 'use client' directive
+
+interface PageProps {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
+}
+
+export default async function Page({ params, searchParams }: PageProps) {
+  const { id } = await params; // Must await in Next.js 15
+  const search = await searchParams;
+  
+  const data = await fetchData(id);
+  return <div>{data.title}</div>;
+}
+```
+
+**Client Components:**
+```typescript
+'use client';
+
+import { useState } from 'react';
+
+interface CounterProps {
+  initialCount?: number;
+}
+
+export default function Counter({ initialCount = 0 }: CounterProps) {
+  const [count, setCount] = useState(initialCount);
+  
+  return (
+    <button onClick={() => setCount(c => c + 1)}>
+      Count: {count}
+    </button>
+  );
+}
+```
+
+### API Route Types
+
+```typescript
+// app/api/users/route.ts
+import { NextRequest, NextResponse } from 'next/server';
+
+interface User {
+  id: string;
+  name: string;
+  email: string;
+}
+
+export async function GET(request: NextRequest): Promise<NextResponse<User[]>> {
+  const users = await db.user.findMany();
+  return NextResponse.json(users);
+}
+
+export async function POST(request: NextRequest): Promise<NextResponse<User>> {
+  const body = await request.json();
+  const user = await db.user.create({ data: body });
+  return NextResponse.json(user, { status: 201 });
+}
+```
+
+## Data Fetching Patterns
+
+### Static Site Generation (SSG)
+
+**Use for:** Marketing pages, blog posts, documentation
+
+```typescript
+// app/blog/[slug]/page.tsx
+interface BlogPostProps {
+  params: Promise<{ slug: string }>;
+}
+
+export default async function BlogPost({ params }: BlogPostProps) {
+  const { slug } = await params;
+  
+  // Static by default (force-cache)
+  const post = await fetch(`https://api.example.com/posts/${slug}`, {
+    cache: 'force-cache'
+  }).then(res => res.json());
+  
+  return (
+    <article>
+      <h1>{post.title}</h1>
+      <div dangerouslySetInnerHTML={{ __html: post.content }} />
+    </article>
+  );
+}
+
+// Generate all static paths at build time
+export async function generateStaticParams() {
+  const posts = await fetch('https://api.example.com/posts')
+    .then(res => res.json());
+  
+  return posts.map((post: { slug: string }) => ({
+    slug: post.slug,
+  }));
+}
+
+// Generate metadata for SEO
+export async function generateMetadata({ params }: BlogPostProps) {
+  const { slug } = await params;
+  const post = await fetch(`https://api.example.com/posts/${slug}`)
+    .then(res => res.json());
+  
+  return {
+    title: post.title,
+    description: post.excerpt,
+    openGraph: {
+      title: post.title,
+      description: post.excerpt,
+      images: [post.coverImage],
+    },
+  };
+}
+```
+
+### Incremental Static Regeneration (ISR)
+
+**Use for:** Content that updates occasionally
+
+```typescript
+// app/products/[id]/page.tsx
+export default async function Product({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+  
+  // Revalidate every hour
+  const product = await fetch(`https://api.example.com/products/${id}`, {
+    next: { revalidate: 3600 }
+  }).then(res => res.json());
+  
+  return <div>{product.name}</div>;
+}
+```
+
+### Server-Side Rendering (SSR)
+
+**Use for:** User-specific content, real-time data
+
+```typescript
+// app/dashboard/page.tsx
+export default async function Dashboard() {
+  // Force dynamic rendering
+  const user = await fetch('https://api.example.com/user', {
+    cache: 'no-store'
+  }).then(res => res.json());
+  
+  return <div>Welcome, {user.name}!</div>;
+}
+
+// Alternative: Use dynamic functions to force SSR
+import { cookies } from 'next/headers';
+
+export default async function Dashboard() {
+  const cookieStore = await cookies();
+  const token = cookieStore.get('token');
+  
+  // This is now dynamic due to cookies() usage
+  const user = await fetchUser(token);
+  return <div>Welcome, {user.name}!</div>;
+}
+```
+
+## Component Patterns
+
+### Server Component Composition
+
+```typescript
+// app/page.tsx (Server Component)
+import ClientCounter from '@/components/ClientCounter';
+import ServerUserList from '@/components/ServerUserList';
+
+export default async function Home() {
+  const initialData = await fetchData();
+  
+  return (
+    <div>
+      <h1>My App</h1>
+      
+      {/* Server Component - fetches its own data */}
+      <ServerUserList />
+      
+      {/* Client Component - receives data as props */}
+      <ClientCounter initialCount={initialData.count} />
+    </div>
+  );
+}
+```
+
+### Client Component with Server Data
+
+```typescript
+// components/ClientComponent.tsx
+'use client';
+
+import { useState, useEffect } from 'react';
+
+interface Props {
+  initialData: {
+    id: string;
+    name: string;
+  };
+}
+
+export default function ClientComponent({ initialData }: Props) {
+  const [data, setData] = useState(initialData);
+  
+  // Client-side interactivity
+  const handleUpdate = () => {
+    setData({ ...data, name: 'Updated' });
+  };
+  
+  return (
+    <div>
+      <p>{data.name}</p>
+      <button onClick={handleUpdate}>Update</button>
+    </div>
+  );
+}
+```
+
+### Shared Components
+
+```typescript
+// components/shared/Button.tsx
+// Can be used in both Server and Client Components
+import { ButtonHTMLAttributes, forwardRef } from 'react';
+import { cn } from '@/lib/utils';
+
+interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
+  variant?: 'primary' | 'secondary' | 'ghost';
+  size?: 'sm' | 'md' | 'lg';
+}
+
+const Button = forwardRef<HTMLButtonElement, ButtonProps>(
+  ({ variant = 'primary', size = 'md', className, ...props }, ref) => {
+    return (
+      <button
+        ref={ref}
+        className={cn(
+          'rounded-lg font-medium transition-colors',
+          {
+            'bg-blue-600 text-white hover:bg-blue-700': variant === 'primary',
+            'bg-gray-200 text-gray-900 hover:bg-gray-300': variant === 'secondary',
+            'bg-transparent hover:bg-gray-100': variant === 'ghost',
+            'px-3 py-1.5 text-sm': size === 'sm',
+            'px-4 py-2 text-base': size === 'md',
+            'px-6 py-3 text-lg': size === 'lg',
+          },
+          className
+        )}
+        {...props}
+      />
+    );
+  }
+);
+
+Button.displayName = 'Button';
+
+export default Button;
+```
+
+## Styling Conventions
+
+### Tailwind CSS (Recommended)
+
+```typescript
+// tailwind.config.ts
+import type { Config } from 'tailwindcss';
+
+const config: Config = {
+  content: [
+    './app/**/*.{js,ts,jsx,tsx,mdx}',
+    './components/**/*.{js,ts,jsx,tsx,mdx}',
+  ],
+  theme: {
+    extend: {
+      colors: {
+        brand: {
+          50: '#f0f9ff',
+          // ... full palette
+          900: '#0c4a6e',
+        },
+      },
+      fontFamily: {
+        sans: ['var(--font-inter)', 'system-ui', 'sans-serif'],
+        mono: ['var(--font-geist-mono)', 'monospace'],
+      },
+    },
+  },
+  plugins: [],
+};
+
+export default config;
+```
+
+### CSS Modules (Alternative)
+
+```typescript
+// components/Card.tsx
+import styles from './Card.module.css';
+
+export default function Card({ children }: { children: React.ReactNode }) {
+  return <div className={styles.card}>{children}</div>;
+}
+```
+
+```css
+/* components/Card.module.css */
+.card {
+  padding: 1rem;
+  border-radius: 0.5rem;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+```
+
+### Global Styles
+
+```css
+/* app/globals.css */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --foreground: 0 0% 0%;
+    --background: 0 0% 100%;
+    /* More CSS variables */
+  }
+  
+  .dark {
+    --foreground: 0 0% 100%;
+    --background: 0 0% 0%;
+  }
+}
+
+@layer components {
+  .btn {
+    @apply px-4 py-2 rounded-lg font-medium transition-colors;
+  }
+}
+```
+
+## Image Optimization
+
+### next/image Component
+
+```typescript
+import Image from 'next/image';
+
+// Static import (build-time optimization)
+import heroImage from '@/public/images/hero.jpg';
+
+export default function Hero() {
+  return (
+    <div>
+      {/* Local image with static import */}
+      <Image
+        src={heroImage}
+        alt="Hero image"
+        priority // Load immediately (above fold)
+        placeholder="blur" // Automatic blur placeholder
+      />
+      
+      {/* Remote image with dimensions */}
+      <Image
+        src="https://example.com/image.jpg"
+        alt="Remote image"
+        width={800}
+        height={600}
+        sizes="(max-width: 768px) 100vw, 800px"
+      />
+    </div>
+  );
+}
+```
+
+### Image Configuration
+
+```typescript
+// next.config.mjs
+/** @type {import('next').NextConfig} */
+const nextConfig = {
+  images: {
+    formats: ['image/avif', 'image/webp'],
+    deviceSizes: [640, 750, 828, 1080, 1200, 1920],
+    imageSizes: [16, 32, 48, 64, 96, 128, 256],
+    remotePatterns: [
+      {
+        protocol: 'https',
+        hostname: 'example.com',
+        pathname: '/images/**',
+      },
+    ],
+  },
+};
+
+export default nextConfig;
+```
+
+## Font Optimization
+
+### Using next/font
+
+```typescript
+// app/layout.tsx
+import { Inter, Geist_Mono } from 'next/font/google';
+
+const inter = Inter({
+  subsets: ['latin'],
+  variable: '--font-inter',
+  display: 'swap',
+});
+
+const geistMono = Geist_Mono({
+  subsets: ['latin'],
+  variable: '--font-geist-mono',
+  display: 'swap',
+});
+
+export default function RootLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <html lang="en" className={`${inter.variable} ${geistMono.variable}`}>
+      <body className="font-sans">{children}</body>
+    </html>
+  );
+}
+```
+
+### Local Fonts
+
+```typescript
+import localFont from 'next/font/local';
+
+const customFont = localFont({
+  src: './fonts/CustomFont.woff2',
+  variable: '--font-custom',
+  display: 'swap',
+});
+```
+
+## Metadata & SEO
+
+### Static Metadata
+
+```typescript
+// app/layout.tsx
+import type { Metadata } from 'next';
+
+export const metadata: Metadata = {
+  title: {
+    default: 'My App',
+    template: '%s | My App', // Page title | My App
+  },
+  description: 'The best app ever built',
+  keywords: ['nextjs', 'react', 'typescript'],
+  authors: [{ name: 'Your Name' }],
+  openGraph: {
+    type: 'website',
+    locale: 'en_US',
+    url: 'https://example.com',
+    siteName: 'My App',
+    images: [
+      {
+        url: 'https://example.com/og-image.jpg',
+        width: 1200,
+        height: 630,
+        alt: 'My App',
+      },
+    ],
+  },
+  twitter: {
+    card: 'summary_large_image',
+    site: '@myapp',
+    creator: '@myapp',
+  },
+  robots: {
+    index: true,
+    follow: true,
+  },
+};
+```
+
+### Dynamic Metadata
+
+```typescript
+// app/blog/[slug]/page.tsx
+import type { Metadata } from 'next';
+
+interface Props {
+  params: Promise<{ slug: string }>;
+}
+
+export async function generateMetadata({ params }: Props): Promise<Metadata> {
+  const { slug } = await params;
+  const post = await fetchPost(slug);
+  
+  return {
+    title: post.title,
+    description: post.excerpt,
+    keywords: post.tags,
+    openGraph: {
+      title: post.title,
+      description: post.excerpt,
+      type: 'article',
+      publishedTime: post.publishedAt,
+      authors: [post.author.name],
+      images: [post.coverImage],
+    },
+  };
+}
+```
+
+### Sitemap Generation
+
+```typescript
+// app/sitemap.ts
+import { MetadataRoute } from 'next';
+
+export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
+  const baseUrl = 'https://example.com';
+  
+  // Static pages
+  const staticPages: MetadataRoute.Sitemap = [
+    {
+      url: baseUrl,
+      lastModified: new Date(),
+      changeFrequency: 'weekly',
+      priority: 1,
+    },
+    {
+      url: `${baseUrl}/about`,
+      lastModified: new Date(),
+      changeFrequency: 'monthly',
+      priority: 0.8,
+    },
+  ];
+  
+  // Dynamic pages
+  const posts = await fetchAllPosts();
+  const postPages: MetadataRoute.Sitemap = posts.map(post => ({
+    url: `${baseUrl}/blog/${post.slug}`,
+    lastModified: post.updatedAt,
+    changeFrequency: 'monthly',
+    priority: 0.7,
+  }));
+  
+  return [...staticPages, ...postPages];
+}
+```
+
+### Robots.txt
+
+```typescript
+// app/robots.ts
+import { MetadataRoute } from 'next';
+
+export default function robots(): MetadataRoute.Robots {
+  return {
+    rules: [
+      {
+        userAgent: '*',
+        allow: '/',
+        disallow: ['/admin/', '/api/'],
+      },
+    ],
+    sitemap: 'https://example.com/sitemap.xml',
+  };
+}
+```
+
+## Server Actions (Preferred over API Routes)
+
+```typescript
+// app/actions.ts
+'use server';
+
+import { revalidatePath } from 'next/cache';
+import { z } from 'zod';
+
+const CreatePostSchema = z.object({
+  title: z.string().min(1).max(100),
+  content: z.string().min(1),
+  published: z.boolean(),
+});
+
+export async function createPost(formData: FormData) {
+  const rawData = {
+    title: formData.get('title'),
+    content: formData.get('content'),
+    published: formData.get('published') === 'true',
+  };
+  
+  // Validate with Zod
+  const result = CreatePostSchema.safeParse(rawData);
+  
+  if (!result.success) {
+    return {
+      errors: result.error.flatten().fieldErrors,
+    };
+  }
+  
+  // Create post
+  const post = await db.post.create({
+    data: result.data,
+  });
+  
+  // Revalidate the posts page
+  revalidatePath('/blog');
+  
+  return { success: true, post };
+}
+```
+
+### Using Server Actions in Client Components
+
+```typescript
+// app/blog/new/page.tsx
+'use client';
+
+import { useFormState, useFormStatus } from 'react';
+import { createPost } from '@/app/actions';
+
+function SubmitButton() {
+  const { pending } = useFormStatus();
+  
+  return (
+    <button type="submit" disabled={pending}>
+      {pending ? 'Creating...' : 'Create Post'}
+    </button>
+  );
+}
+
+export default function NewPostPage() {
+  const [state, formAction] = useFormState(createPost, null);
+  
+  return (
+    <form action={formAction}>
+      <input name="title" placeholder="Title" required />
+      {state?.errors?.title && <p>{state.errors.title}</p>}
+      
+      <textarea name="content" placeholder="Content" required />
+      {state?.errors?.content && <p>{state.errors.content}</p>}
+      
+      <label>
+        <input type="checkbox" name="published" value="true" />
+        Published
+      </label>
+      
+      <SubmitButton />
+    </form>
+  );
+}
+```
+
+## Middleware (Edge Runtime)
+
+```typescript
+// middleware.ts
+import { NextResponse } from 'next/server';
+import type { NextRequest } from 'next/server';
+
+export function middleware(request: NextRequest) {
+  // Authentication check
+  const token = request.cookies.get('token');
+  
+  if (!token && request.nextUrl.pathname.startsWith('/dashboard')) {
+    return NextResponse.redirect(new URL('/login', request.url));
+  }
+  
+  // Add custom headers
+  const response = NextResponse.next();
+  response.headers.set('x-custom-header', 'value');
+  
+  return response;
+}
+
+export const config = {
+  matcher: [
+    '/((?!api|_next/static|_next/image|favicon.ico).*)',
+  ],
+};
+```
+
+## Error Handling
+
+### Error Boundary
+
+```typescript
+// app/error.tsx
+'use client';
+
+import { useEffect } from 'react';
+
+export default function Error({
+  error,
+  reset,
+}: {
+  error: Error & { digest?: string };
+  reset: () => void;
+}) {
+  useEffect(() => {
+    // Log error to error reporting service
+    console.error(error);
+  }, [error]);
+  
+  return (
+    <div>
+      <h2>Something went wrong!</h2>
+      <button onClick={reset}>Try again</button>
+    </div>
+  );
+}
+```
+
+### Not Found Page
+
+```typescript
+// app/not-found.tsx
+import Link from 'next/link';
+
+export default function NotFound() {
+  return (
+    <div>
+      <h2>404 - Page Not Found</h2>
+      <p>Could not find requested resource</p>
+      <Link href="/">Return Home</Link>
+    </div>
+  );
+}
+```
+
+### Loading States
+
+```typescript
+// app/loading.tsx
+export default function Loading() {
+  return (
+    <div>
+      <div className="animate-pulse">
+        <div className="h-4 bg-gray-200 rounded w-3/4 mb-4"></div>
+        <div className="h-4 bg-gray-200 rounded w-1/2"></div>
+      </div>
+    </div>
+  );
+}
+```
+
+## Performance Best Practices
+
+### Code Splitting with Dynamic Imports
+
+```typescript
+import dynamic from 'next/dynamic';
+
+// Client Component with loading state
+const HeavyComponent = dynamic(() => import('@/components/HeavyComponent'), {
+  loading: () => <p>Loading...</p>,
+  ssr: false, // Disable SSR for this component
+});
+
+export default function Page() {
+  return (
+    <div>
+      <h1>My Page</h1>
+      <HeavyComponent />
+    </div>
+  );
+}
+```
+
+### Streaming with Suspense
+
+```typescript
+import { Suspense } from 'react';
+
+async function SlowComponent() {
+  const data = await fetchSlowData();
+  return <div>{data}</div>;
+}
+
+export default function Page() {
+  return (
+    <div>
+      <h1>Fast Content</h1>
+      
+      <Suspense fallback={<div>Loading slow content...</div>}>
+        <SlowComponent />
+      </Suspense>
+    </div>
+  );
+}
+```
+
+## Testing
+
+### Component Testing
+
+```typescript
+// __tests__/Button.test.tsx
+import { render, screen, fireEvent } from '@testing-library/react';
+import Button from '@/components/Button';
+
+describe('Button', () => {
+  it('renders with text', () => {
+    render(<Button>Click me</Button>);
+    expect(screen.getByText('Click me')).toBeInTheDocument();
+  });
+  
+  it('calls onClick when clicked', () => {
+    const handleClick = jest.fn();
+    render(<Button onClick={handleClick}>Click me</Button>);
+    
+    fireEvent.click(screen.getByText('Click me'));
+    expect(handleClick).toHaveBeenCalledTimes(1);
+  });
+});
+```
+
+### E2E Testing with Playwright
+
+```typescript
+// e2e/homepage.spec.ts
+import { test, expect } from '@playwright/test';
+
+test('homepage loads correctly', async ({ page }) => {
+  await page.goto('/');
+  
+  await expect(page).toHaveTitle(/My App/);
+  await expect(page.locator('h1')).toContainText('Welcome');
+});
+
+test('navigation works', async ({ page }) => {
+  await page.goto('/');
+  await page.click('a[href="/about"]');
+  
+  await expect(page).toHaveURL(/\/about/);
+  await expect(page.locator('h1')).toContainText('About');
+});
+```
+
+## Don't Do This
+
+### ❌ Using Pages Router
+```typescript
+// pages/index.tsx - OLD PATTERN
+export default function Home() {
+  return <div>Home</div>;
+}
+```
+
+### ❌ Forgetting 'use client' for Hooks
+```typescript
+// Will error: useState used in Server Component
+import { useState } from 'react';
+
+export default function Counter() {
+  const [count, setCount] = useState(0); // ❌ Error!
+  return <div>{count}</div>;
+}
+```
+
+### ❌ Not Awaiting Async Params
+```typescript
+// Next.js 15 will error
+export default function Page({ params }) {
+  return <div>{params.id}</div>; // ❌ Error!
+}
+```
+
+### ❌ Using `any` Type
+```typescript
+// Bad type safety
+function processData(data: any) { // ❌ Never use 'any'
+  return data.value;
+}
+```
+
+### ❌ Inline Functions in Props
+```typescript
+// Causes unnecessary re-renders
+export default function Parent() {
+  return (
+    <Child onClick={() => console.log('clicked')} /> // ❌ New function every render
+  );
+}
+```
+
+### ❌ Missing Alt Text on Images
+```typescript
+<Image src="/image.jpg" alt="" /> // ❌ Empty alt is bad for a11y
+```
+
+### ❌ Using SSR When SSG Works
+```typescript
+// Wastes Vercel function executions
+export default async function Page() {
+  const data = await fetch('url', { cache: 'no-store' }); // ❌ Expensive!
+  return <div>{data}</div>;
+}
+```
+
+## Do This Instead
+
+### ✅ Use App Router
+```typescript
+// app/page.tsx - NEW PATTERN
+export default function Home() {
+  return <div>Home</div>;
+}
+```
+
+### ✅ Mark Client Components
+```typescript
+'use client'; // ✅ Directive at top
+
+import { useState } from 'react';
+
+export default function Counter() {
+  const [count, setCount] = useState(0);
+  return <div>{count}</div>;
+}
+```
+
+### ✅ Await Async Params
+```typescript
+export default async function Page({ 
+  params 
+}: { 
+  params: Promise<{ id: string }> 
+}) {
+  const { id } = await params; // ✅ Correct!
+  return <div>{id}</div>;
+}
+```
+
+### ✅ Proper TypeScript
+```typescript
+interface Data {
+  value: string;
+}
+
+function processData(data: Data): string { // ✅ Typed properly
+  return data.value;
+}
+```
+
+### ✅ useCallback for Functions
+```typescript
+import { useCallback } from 'react';
+
+export default function Parent() {
+  const handleClick = useCallback(() => {
+    console.log('clicked');
+  }, []);
+  
+  return <Child onClick={handleClick} />; // ✅ Stable reference
+}
+```
+
+### ✅ Descriptive Alt Text
+```typescript
+<Image 
+  src="/product.jpg" 
+  alt="Blue running shoes with white laces" // ✅ Descriptive
+/>
+```
+
+### ✅ Use SSG with ISR
+```typescript
+export default async function Page() {
+  const data = await fetch('url', { 
+    next: { revalidate: 3600 } // ✅ Cached, revalidates hourly
+  });
+  return <div>{data}</div>;
+}
+```
+
+## Vercel Deployment Checklist
+
+### Before Deployment
+- [ ] TypeScript builds without errors
+- [ ] ESLint passes with no warnings
+- [ ] All images use next/image
+- [ ] Metadata configured for all pages
+- [ ] Environment variables documented
+- [ ] Performance budget met (< 100kb first load)
+- [ ] Accessibility audit passed
+- [ ] Mobile responsive tested
+
+### After Deployment
+- [ ] Custom domain configured
+- [ ] HTTPS enabled
+- [ ] Analytics tracking works
+- [ ] Sitemap accessible at /sitemap.xml
+- [ ] robots.txt accessible
+- [ ] OpenGraph tags work (test with social sharing)
+- [ ] Error tracking configured
+- [ ] Performance monitoring enabled
+
+## Conclusion
+
+Follow these standards to build:
+- **Fast**: Optimized for Core Web Vitals
+- **Scalable**: Leveraging Next.js and Vercel's platform
+- **Maintainable**: Type-safe, well-structured code
+- **Accessible**: WCAG AA compliant
+- **SEO-Friendly**: Discoverable by search engines
+- **Cost-Effective**: Maximizing free tier usage
+
+Always prioritize user experience, performance, and code quality.
