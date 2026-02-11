@@ -1,0 +1,128 @@
+---
+description: React Native development standards for mobile (iOS Swift + Android Kotlin)
+globs: ["**/*.tsx", "**/*.ts", "**/*.swift", "**/*.kt"]
+alwaysApply: false
+---
+
+# React Native + Native Development Standards
+
+**Context**: You're working on React Native mobile apps with native modules (iOS Swift + Android Kotlin).
+
+## React Native Conventions
+
+### Components
+- Use functional components with hooks
+- Prefer `React.FC` or explicit return types
+- Keep components small and focused (< 200 lines)
+
+### Platform-Specific Code
+```typescript
+// Use platform extensions for different implementations
+- Component.ios.tsx  // iOS-specific
+- Component.android.tsx  // Android-specific
+- Component.tsx  // Shared implementation
+```
+
+### Styling
+- Use `StyleSheet.create()` for performance
+- Keep styles at bottom of file
+- Use relative units (`width: '100%'` not `width: 350`)
+- Platform-specific styles: `...Platform.select({ ios: {}, android: {} })`
+
+### State Management
+- Use React Context for app-wide state
+- Local state with `useState` for component state
+- Avoid prop drilling beyond 2 levels
+
+## Native Module Conventions
+
+### iOS (Swift)
+- Use `@objc` for methods exposed to React Native
+- Follow Apple's Swift naming conventions
+- Use `RCTPromiseResolveBlock` and `RCTPromiseRejectBlock` for async
+- Always handle errors gracefully
+
+```swift
+@objc(MyModule)
+class MyModule: NSObject {
+  @objc
+  func doSomething(_ param: String, 
+                   resolve: @escaping RCTPromiseResolveBlock,
+                   reject: @escaping RCTPromiseRejectBlock) {
+    // Implementation
+  }
+}
+```
+
+### Android (Kotlin)
+- Extend `ReactContextBaseJavaModule`
+- Use `@ReactMethod` annotation
+- Use `Promise` for async operations
+- Handle null safety properly
+
+```kotlin
+class MyModule(reactContext: ReactApplicationContext) : 
+  ReactContextBaseJavaModule(reactContext) {
+  
+  @ReactMethod
+  fun doSomething(param: String, promise: Promise) {
+    try {
+      // Implementation
+      promise.resolve(result)
+    } catch (e: Exception) {
+      promise.reject("ERROR_CODE", e.message, e)
+    }
+  }
+}
+```
+
+## Common Patterns
+
+### Navigation
+- Use React Navigation v6+
+- Type-safe navigation with TypeScript
+- Keep navigation config centralized
+
+### Error Handling
+- Use error boundaries for component errors
+- Global error handler for unhandled rejections
+- Proper error messages to users (not stack traces)
+
+### Performance
+- Use `React.memo()` for expensive components
+- Virtualize long lists with `FlatList`
+- Avoid inline function definitions in render
+- Use `useCallback` and `useMemo` appropriately
+
+### Testing
+- Unit tests for business logic
+- Component tests with React Native Testing Library
+- E2E tests for critical flows (Detox)
+- Mock native modules in tests
+
+## Mobile-Specific Considerations
+
+### Offline Support
+- Handle network failures gracefully
+- Cache data locally when appropriate
+- Show offline indicators
+
+### Permissions
+- Request permissions at point of use
+- Handle permission denials gracefully
+- Provide clear rationale for permissions
+
+### Platform Differences
+- Document when behavior differs between iOS/Android
+- Test on both platforms before considering feature done
+- Use platform-specific UI patterns (iOS modals vs Android bottom sheets)
+
+## Don't Do This
+
+❌ Hardcode dimensions
+❌ Use `var` in TypeScript (use `const` or `let`)
+❌ Ignore TypeScript errors
+❌ Mix native and JS state without proper bridge
+❌ Block the JS thread with heavy computation
+❌ Ignore memory leaks in native code
+❌ Skip testing on real devices
