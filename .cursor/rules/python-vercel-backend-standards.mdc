@@ -1,0 +1,862 @@
+---
+description: Python Flask + Vercel backend coding standards and best practices
+globs: "**/*.py, **/pyproject.toml, **/requirements.txt, **/vercel.json"
+---
+
+# Python Flask + Vercel Backend Standards
+
+## Core Principles
+
+1. **Application Factory** - Always use `create_app()` factory pattern
+2. **Blueprints** - Organize routes into domain-specific blueprints
+3. **Type Hints** - Use Python type hints on all functions and variables
+4. **Pydantic Validation** - Validate all input/output with Pydantic models
+5. **Service Layer** - Business logic in services, not routes
+6. **Serverless-Aware** - Optimize for Vercel's serverless environment
+7. **Security First** - Auth, validation, CORS, and rate limiting built-in
+
+## Project Structure
+
+### Standard Layout
+```
+project/
+├── app/
+│   ├── __init__.py              # Application factory (create_app)
+│   ├── extensions.py            # Flask extensions (db, migrate, cors, limiter)
+│   ├── config.py                # Configuration classes (Dev, Prod, Test)
+│   ├── errors.py                # Global error handlers
+│   ├── api/
+│   │   ├── __init__.py
+│   │   ├── health.py            # Health check endpoint (/health)
+│   │   └── v1/
+│   │       ├── __init__.py      # v1 Blueprint registration
+│   │       ├── auth.py          # Auth routes
+│   │       ├── users.py         # User routes
+│   │       └── items.py         # Domain routes
+│   ├── models/
+│   │   ├── __init__.py          # Export all models
+│   │   ├── base.py              # Base model with common fields
+│   │   ├── user.py              # User model
+│   │   └── item.py              # Domain models
+│   ├── schemas/
+│   │   ├── __init__.py
+│   │   ├── common.py            # Shared schemas (Pagination, Error)
+│   │   ├── user.py              # User Pydantic schemas
+│   │   └── item.py              # Domain Pydantic schemas
+│   ├── services/
+│   │   ├── __init__.py
+│   │   ├── user_service.py      # User business logic
+│   │   └── item_service.py      # Domain business logic
+│   ├── auth/
+│   │   ├── __init__.py
+│   │   ├── jwt.py               # JWT token utilities
+│   │   └── decorators.py        # Auth decorators (@require_auth)
+│   └── utils/
+│       ├── __init__.py
+│       ├── pagination.py        # Pagination helpers
+│       └── responses.py         # Response helpers
+├── tests/
+│   ├── conftest.py              # Pytest fixtures (app, client, db)
+│   ├── test_auth.py
+│   ├── test_users.py
+│   └── test_items.py
+├── migrations/                  # Alembic/Flask-Migrate
+├── public/                      # Static files (Vercel CDN)
+│   └── robots.txt
+├── app.py                       # Vercel entrypoint
+├── pyproject.toml               # Project config, dependencies, Vercel config
+├── requirements.txt             # Pinned dependencies
+├── .env.example                 # Environment variable documentation
+└── .gitignore
+```
+
+### File Naming Conventions
+- Snake_case for all Python files: `user_service.py`, `jwt.py`
+- Models: singular nouns (`user.py`, `item.py`)
+- Schemas: match model names (`user.py` for User schemas)
+- Services: `<domain>_service.py`
+- Tests: `test_<domain>.py`
+
+## Python Conventions
+
+### Type Hints (Required)
+```python
+# ✅ DO: Type all functions
+def get_user_by_id(user_id: int) -> User | None:
+    return db.session.get(User, user_id)
+
+def create_user(data: UserCreate) -> User:
+    user = User(**data.model_dump())
+    db.session.add(user)
+    db.session.commit()
+    return user
+
+# ❌ DON'T: Skip type hints
+def get_user_by_id(user_id):
+    return db.session.get(User, user_id)
+```
+
+### String Formatting
+```python
+# ✅ DO: f-strings
+message = f"User {user.name} created successfully"
+
+# ❌ DON'T: % formatting or .format()
+message = "User %s created" % user.name
+message = "User {} created".format(user.name)
+```
+
+### Imports
+```python
+# ✅ DO: Organized imports (stdlib, third-party, local)
+from __future__ import annotations
+
+import os
+from datetime import datetime, UTC
+
+from flask import Blueprint, jsonify, request
+from pydantic import BaseModel, EmailStr
+
+from app.extensions import db
+from app.models.user import User
+from app.schemas.user import UserCreate, UserResponse
+```
+
+### Constants
+```python
+# ✅ DO: Module-level constants in UPPER_SNAKE_CASE
+MAX_PAGE_SIZE = 100
+DEFAULT_PAGE_SIZE = 20
+TOKEN_EXPIRY_HOURS = 24
+```
+
+## Flask Patterns
+
+### Application Factory
+```python
+# app/__init__.py
+from flask import Flask
+
+def create_app(config_name: str = "default") -> Flask:
+    """Create and configure the Flask application."""
+    app = Flask(__name__)
+
+    # Load configuration
+    from app.config import config
+    app.config.from_object(config[config_name])
+
+    # Initialize extensions
+    _init_extensions(app)
+
+    # Register blueprints
+    _register_blueprints(app)
+
+    # Register error handlers
+    from app.errors import register_error_handlers
+    register_error_handlers(app)
+
+    return app
+
+def _init_extensions(app: Flask) -> None:
+    from app.extensions import db, migrate, cors, limiter
+    db.init_app(app)
+    migrate.init_app(app, db)
+    cors.init_app(app)
+    limiter.init_app(app)
+
+def _register_blueprints(app: Flask) -> None:
+    from app.api.health import health_bp
+    from app.api.v1 import api_v1_bp
+    app.register_blueprint(health_bp)
+    app.register_blueprint(api_v1_bp, url_prefix="/api/v1")
+```
+
+### Configuration
+```python
+# app/config.py
+import os
+
+class BaseConfig:
+    SECRET_KEY = os.environ.get("SECRET_KEY", "dev-secret-key")
+    SQLALCHEMY_TRACK_MODIFICATIONS = False
+
+class DevelopmentConfig(BaseConfig):
+    DEBUG = True
+    SQLALCHEMY_DATABASE_URI = os.environ.get(
+        "DATABASE_URL", "sqlite:///dev.db"
+    )
+
+class ProductionConfig(BaseConfig):
+    DEBUG = False
+    SQLALCHEMY_DATABASE_URI = os.environ.get("DATABASE_URL")
+    SQLALCHEMY_ENGINE_OPTIONS = {
+        "pool_size": 5,
+        "max_overflow": 2,
+        "pool_timeout": 10,
+        "pool_recycle": 300,
+        "pool_pre_ping": True,
+    }
+
+class TestingConfig(BaseConfig):
+    TESTING = True
+    SQLALCHEMY_DATABASE_URI = "sqlite:///:memory:"
+
+config = {
+    "development": DevelopmentConfig,
+    "production": ProductionConfig,
+    "testing": TestingConfig,
+    "default": DevelopmentConfig,
+}
+```
+
+### Vercel Entrypoint
+```python
+# app.py (Vercel entrypoint)
+from app import create_app
+
+app = create_app("production")
+```
+
+### Blueprint Registration
+```python
+# app/api/v1/__init__.py
+from flask import Blueprint
+
+api_v1_bp = Blueprint("api_v1", __name__)
+
+# Import routes AFTER blueprint creation to avoid circular imports
+from app.api.v1 import auth, users, items  # noqa: E402, F401
+```
+
+### Route Patterns
+```python
+# app/api/v1/users.py
+from flask import jsonify, request
+from pydantic import ValidationError
+
+from app.api.v1 import api_v1_bp
+from app.auth.decorators import require_auth
+from app.schemas.user import UserCreate, UserResponse, UserUpdate
+from app.services.user_service import UserService
+
+@api_v1_bp.route("/users", methods=["GET"])
+@require_auth
+def list_users():
+    """List users with pagination."""
+    page = request.args.get("page", 1, type=int)
+    per_page = request.args.get("per_page", 20, type=int)
+    result = UserService.list_paginated(page=page, per_page=per_page)
+    return jsonify(result)
+
+@api_v1_bp.route("/users", methods=["POST"])
+def create_user():
+    """Create a new user."""
+    try:
+        data = UserCreate.model_validate(request.get_json())
+    except ValidationError as e:
+        return jsonify({"error": "Validation failed", "details": e.errors()}), 422
+    user = UserService.create(data)
+    return jsonify(UserResponse.model_validate(user).model_dump()), 201
+
+@api_v1_bp.route("/users/<int:user_id>", methods=["GET"])
+@require_auth
+def get_user(user_id: int):
+    """Get a single user by ID."""
+    user = UserService.get_by_id(user_id)
+    if not user:
+        return jsonify({"error": "User not found"}), 404
+    return jsonify(UserResponse.model_validate(user).model_dump())
+
+@api_v1_bp.route("/users/<int:user_id>", methods=["PATCH"])
+@require_auth
+def update_user(user_id: int):
+    """Partially update a user."""
+    try:
+        data = UserUpdate.model_validate(request.get_json())
+    except ValidationError as e:
+        return jsonify({"error": "Validation failed", "details": e.errors()}), 422
+    user = UserService.update(user_id, data)
+    if not user:
+        return jsonify({"error": "User not found"}), 404
+    return jsonify(UserResponse.model_validate(user).model_dump())
+
+@api_v1_bp.route("/users/<int:user_id>", methods=["DELETE"])
+@require_auth
+def delete_user(user_id: int):
+    """Delete a user."""
+    success = UserService.delete(user_id)
+    if not success:
+        return jsonify({"error": "User not found"}), 404
+    return "", 204
+```
+
+### Health Check
+```python
+# app/api/health.py
+from flask import Blueprint, jsonify
+
+health_bp = Blueprint("health", __name__)
+
+@health_bp.route("/health")
+def health_check():
+    """Health check endpoint for monitoring."""
+    return jsonify({"status": "healthy"})
+
+@health_bp.route("/health/ready")
+def readiness_check():
+    """Readiness check - verifies database connectivity."""
+    try:
+        from app.extensions import db
+        db.session.execute(db.text("SELECT 1"))
+        return jsonify({"status": "ready", "database": "connected"})
+    except Exception as e:
+        return jsonify({"status": "not ready", "database": str(e)}), 503
+```
+
+## Pydantic Schemas
+
+### Request/Response Schemas
+```python
+# app/schemas/user.py
+from __future__ import annotations
+from datetime import datetime
+from pydantic import BaseModel, EmailStr, Field
+
+class UserCreate(BaseModel):
+    """Schema for creating a user."""
+    email: EmailStr
+    name: str = Field(..., min_length=1, max_length=255)
+    password: str = Field(..., min_length=8, max_length=128)
+
+class UserUpdate(BaseModel):
+    """Schema for updating a user (partial)."""
+    name: str | None = Field(None, min_length=1, max_length=255)
+    email: EmailStr | None = None
+
+class UserResponse(BaseModel):
+    """Schema for user API responses."""
+    id: int
+    email: str
+    name: str
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+```
+
+### Common Schemas
+```python
+# app/schemas/common.py
+from pydantic import BaseModel, Field
+
+class PaginationParams(BaseModel):
+    page: int = Field(1, ge=1)
+    per_page: int = Field(20, ge=1, le=100)
+
+class PaginatedResponse(BaseModel):
+    items: list
+    total: int
+    page: int
+    per_page: int
+    pages: int
+
+class ErrorResponse(BaseModel):
+    error: str
+    details: dict | list | None = None
+```
+
+## SQLAlchemy Models
+
+### Base Model
+```python
+# app/models/base.py
+from datetime import datetime, UTC
+from app.extensions import db
+
+class TimestampMixin:
+    """Mixin that adds created_at and updated_at columns."""
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(UTC), nullable=False)
+    updated_at = db.Column(
+        db.DateTime,
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+        nullable=False,
+    )
+```
+
+### Model Pattern
+```python
+# app/models/user.py
+from app.extensions import db
+from app.models.base import TimestampMixin
+
+class User(TimestampMixin, db.Model):
+    __tablename__ = "users"
+
+    id: int = db.Column(db.Integer, primary_key=True)
+    email: str = db.Column(db.String(255), unique=True, nullable=False, index=True)
+    name: str = db.Column(db.String(255), nullable=False)
+    password_hash: str = db.Column(db.String(255), nullable=False)
+    is_active: bool = db.Column(db.Boolean, default=True, nullable=False)
+
+    def __repr__(self) -> str:
+        return f"<User {self.email}>"
+```
+
+## Service Layer
+
+### Service Pattern
+```python
+# app/services/user_service.py
+from app.extensions import db
+from app.models.user import User
+from app.schemas.user import UserCreate, UserUpdate
+from app.errors import APIError
+
+class UserService:
+    """Business logic for user operations."""
+
+    @staticmethod
+    def get_by_id(user_id: int) -> User | None:
+        return db.session.get(User, user_id)
+
+    @staticmethod
+    def get_by_email(email: str) -> User | None:
+        return User.query.filter_by(email=email).first()
+
+    @staticmethod
+    def create(data: UserCreate) -> User:
+        if UserService.get_by_email(data.email):
+            raise APIError("Email already registered", status_code=409)
+        user = User(
+            email=data.email,
+            name=data.name,
+            password_hash=hash_password(data.password),
+        )
+        db.session.add(user)
+        db.session.commit()
+        return user
+
+    @staticmethod
+    def update(user_id: int, data: UserUpdate) -> User | None:
+        user = UserService.get_by_id(user_id)
+        if not user:
+            return None
+        update_data = data.model_dump(exclude_unset=True)
+        for key, value in update_data.items():
+            setattr(user, key, value)
+        db.session.commit()
+        return user
+
+    @staticmethod
+    def delete(user_id: int) -> bool:
+        user = UserService.get_by_id(user_id)
+        if not user:
+            return False
+        db.session.delete(user)
+        db.session.commit()
+        return True
+
+    @staticmethod
+    def list_paginated(page: int = 1, per_page: int = 20) -> dict:
+        pagination = User.query.order_by(User.created_at.desc()).paginate(
+            page=page, per_page=min(per_page, 100), error_out=False
+        )
+        return {
+            "items": [
+                {"id": u.id, "email": u.email, "name": u.name}
+                for u in pagination.items
+            ],
+            "total": pagination.total,
+            "page": pagination.page,
+            "per_page": pagination.per_page,
+            "pages": pagination.pages,
+        }
+```
+
+## Authentication
+
+### JWT Pattern
+```python
+# app/auth/jwt.py
+import jwt
+from datetime import datetime, timedelta, UTC
+from flask import current_app
+
+def create_access_token(user_id: int) -> str:
+    payload = {
+        "sub": user_id,
+        "iat": datetime.now(UTC),
+        "exp": datetime.now(UTC) + timedelta(hours=24),
+    }
+    return jwt.encode(payload, current_app.config["SECRET_KEY"], algorithm="HS256")
+
+def decode_token(token: str) -> dict:
+    return jwt.decode(token, current_app.config["SECRET_KEY"], algorithms=["HS256"])
+```
+
+### Auth Decorators
+```python
+# app/auth/decorators.py
+from functools import wraps
+from flask import request, jsonify, g
+from app.auth.jwt import decode_token
+
+def require_auth(f):
+    """Decorator to require JWT authentication."""
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        auth_header = request.headers.get("Authorization", "")
+        if not auth_header.startswith("Bearer "):
+            return jsonify({"error": "Missing or invalid authorization header"}), 401
+        token = auth_header[7:]  # Remove "Bearer "
+        try:
+            payload = decode_token(token)
+            g.current_user_id = payload["sub"]
+        except Exception:
+            return jsonify({"error": "Invalid or expired token"}), 401
+        return f(*args, **kwargs)
+    return decorated
+```
+
+## Error Handling
+
+### Standardized Errors
+```python
+# app/errors.py
+from flask import Flask, jsonify
+from pydantic import ValidationError
+from werkzeug.exceptions import HTTPException
+
+class APIError(Exception):
+    """Custom API error with status code and optional details."""
+    def __init__(self, message: str, status_code: int = 400, details: dict | None = None):
+        self.message = message
+        self.status_code = status_code
+        self.details = details
+
+def register_error_handlers(app: Flask) -> None:
+    @app.errorhandler(APIError)
+    def handle_api_error(error: APIError):
+        response = {"error": error.message}
+        if error.details:
+            response["details"] = error.details
+        return jsonify(response), error.status_code
+
+    @app.errorhandler(ValidationError)
+    def handle_validation_error(error: ValidationError):
+        return jsonify({"error": "Validation failed", "details": error.errors()}), 422
+
+    @app.errorhandler(HTTPException)
+    def handle_http_error(error: HTTPException):
+        return jsonify({"error": error.description}), error.code
+
+    @app.errorhandler(404)
+    def handle_not_found(error):
+        return jsonify({"error": "Resource not found"}), 404
+
+    @app.errorhandler(500)
+    def handle_internal_error(error):
+        app.logger.error(f"Internal error: {error}")
+        return jsonify({"error": "Internal server error"}), 500
+```
+
+## Testing
+
+### Pytest Configuration
+```python
+# tests/conftest.py
+import pytest
+from app import create_app
+from app.extensions import db as _db
+
+@pytest.fixture(scope="session")
+def app():
+    """Create application for testing."""
+    app = create_app("testing")
+    with app.app_context():
+        _db.create_all()
+        yield app
+        _db.drop_all()
+
+@pytest.fixture
+def client(app):
+    """Create test client."""
+    return app.test_client()
+
+@pytest.fixture
+def db(app):
+    """Create fresh database for each test."""
+    with app.app_context():
+        _db.create_all()
+        yield _db
+        _db.session.rollback()
+        _db.drop_all()
+
+@pytest.fixture
+def auth_headers(client):
+    """Create authenticated headers for testing."""
+    # Register and login to get token
+    client.post("/api/v1/auth/register", json={
+        "email": "test@example.com",
+        "name": "Test User",
+        "password": "securepassword123",
+    })
+    response = client.post("/api/v1/auth/login", json={
+        "email": "test@example.com",
+        "password": "securepassword123",
+    })
+    token = response.get_json()["access_token"]
+    return {"Authorization": f"Bearer {token}"}
+```
+
+### Test Pattern
+```python
+# tests/test_users.py
+def test_create_user(client, db):
+    response = client.post("/api/v1/users", json={
+        "email": "new@example.com",
+        "name": "New User",
+        "password": "securepassword123",
+    })
+    assert response.status_code == 201
+    data = response.get_json()
+    assert data["email"] == "new@example.com"
+    assert data["name"] == "New User"
+    assert "id" in data
+
+def test_create_user_invalid_email(client, db):
+    response = client.post("/api/v1/users", json={
+        "email": "not-an-email",
+        "name": "Test",
+        "password": "securepassword123",
+    })
+    assert response.status_code == 422
+
+def test_get_user_unauthorized(client, db):
+    response = client.get("/api/v1/users/1")
+    assert response.status_code == 401
+
+def test_get_user(client, db, auth_headers):
+    # Create user first
+    create_resp = client.post("/api/v1/users", json={
+        "email": "user@example.com",
+        "name": "Test User",
+        "password": "securepassword123",
+    })
+    user_id = create_resp.get_json()["id"]
+
+    response = client.get(f"/api/v1/users/{user_id}", headers=auth_headers)
+    assert response.status_code == 200
+    assert response.get_json()["email"] == "user@example.com"
+```
+
+## Vercel Deployment
+
+### pyproject.toml
+```toml
+[project]
+name = "my-flask-api"
+version = "0.1.0"
+description = "Flask API deployed on Vercel"
+requires-python = ">=3.11"
+dependencies = [
+    "flask>=3.0",
+    "flask-sqlalchemy>=3.1",
+    "flask-migrate>=4.0",
+    "flask-cors>=4.0",
+    "flask-limiter>=3.5",
+    "pydantic[email]>=2.5",
+    "sqlalchemy>=2.0",
+    "psycopg2-binary>=2.9",
+    "pyjwt>=2.8",
+    "gunicorn>=21.2",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=4.1",
+    "ruff>=0.3",
+    "mypy>=1.8",
+]
+
+[project.scripts]
+app = "app:app"
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP", "B", "SIM"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_return_any = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+```
+
+### Environment Variables
+```bash
+# .env.example
+# Flask
+SECRET_KEY=your-secret-key-here
+FLASK_ENV=production
+
+# Database
+DATABASE_URL=postgres://user:pass@host:5432/dbname
+
+# Auth (if using external provider)
+JWT_SECRET_KEY=your-jwt-secret
+
+# Rate Limiting
+RATELIMIT_STORAGE_URI=memory://
+```
+
+### Pre-deployment Checklist
+- [ ] `requirements.txt` is up to date (or dependencies in `pyproject.toml`)
+- [ ] Entrypoint (`app.py`) exports `app` instance
+- [ ] All secrets in environment variables (not hardcoded)
+- [ ] `DEBUG = False` in production config
+- [ ] Database connection pooling configured
+- [ ] CORS configured for frontend origin
+- [ ] Health check endpoint exists (`/health`)
+- [ ] Error handlers registered
+- [ ] Bundle size < 250MB (ideally < 50MB)
+
+## Performance Best Practices
+
+### Response Times
+- Target: < 200ms for simple CRUD
+- Target: < 500ms for complex queries
+- Target: < 1s for aggregate operations
+
+### Cold Start Optimization
+- Minimize top-level imports
+- Use lightweight dependencies
+- Lazy-load heavy modules
+- Keep bundle size small (< 50MB ideal)
+
+### Database Performance
+- Use indexes on frequently queried columns
+- Avoid N+1 queries (use `joinedload`)
+- Use pagination for list endpoints
+- Configure connection pooling for serverless
+
+### Caching
+```python
+# Use flask-caching for response caching
+from flask_caching import Cache
+cache = Cache(config={"CACHE_TYPE": "SimpleCache"})
+
+@app.route("/api/v1/stats")
+@cache.cached(timeout=300)  # Cache for 5 minutes
+def get_stats():
+    return jsonify(compute_stats())
+```
+
+## Security Checklist
+
+- [ ] JWT tokens validated and expired properly
+- [ ] Passwords hashed with bcrypt or argon2
+- [ ] CORS restricted to allowed origins
+- [ ] Rate limiting on auth endpoints
+- [ ] Input validated with Pydantic
+- [ ] SQL injection prevented (use ORM, never raw SQL with user input)
+- [ ] Secrets in environment variables
+- [ ] HTTPS enforced (Vercel handles this)
+- [ ] Error messages don't leak internal details
+- [ ] File uploads validated and size-limited (if applicable)
+
+## Linting & Formatting
+
+### Ruff (Recommended)
+```bash
+# Lint
+ruff check .
+
+# Format
+ruff format .
+
+# Fix auto-fixable issues
+ruff check --fix .
+```
+
+### Mypy
+```bash
+# Type check
+mypy app/
+```
+
+### Pre-commit
+```yaml
+# .pre-commit-config.yaml
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.3.0
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.8.0
+    hooks:
+      - id: mypy
+        additional_dependencies: [pydantic, flask]
+```
+
+## Anti-Patterns
+
+### ❌ DON'T: Global app object
+```python
+app = Flask(__name__)  # Global, hard to test
+```
+
+### ✅ DO: Application factory
+```python
+def create_app(config="default"):
+    app = Flask(__name__)
+    return app
+```
+
+### ❌ DON'T: Business logic in routes
+```python
+@app.route("/users", methods=["POST"])
+def create_user():
+    # 50 lines of logic here
+```
+
+### ✅ DO: Service layer
+```python
+@api_bp.route("/users", methods=["POST"])
+def create_user():
+    data = UserCreate.model_validate(request.get_json())
+    user = UserService.create(data)
+    return jsonify(UserResponse.model_validate(user).model_dump()), 201
+```
+
+### ❌ DON'T: Skip input validation
+```python
+data = request.get_json()
+user = User(email=data["email"])  # No validation!
+```
+
+### ✅ DO: Pydantic validation
+```python
+data = UserCreate.model_validate(request.get_json())  # Validates!
+```
+
+### ❌ DON'T: Hardcode secrets
+```python
+SECRET_KEY = "my-super-secret-key"
+```
+
+### ✅ DO: Environment variables
+```python
+SECRET_KEY = os.environ.get("SECRET_KEY")
+```
