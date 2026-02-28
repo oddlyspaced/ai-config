@@ -1,6 +1,7 @@
----
+❓---
 description: Python Flask + Vercel backend coding standards and best practices
-globs: "**/*.py, **/pyproject.toml, **/requirements.txt, **/vercel.json"
+globs: "**/\*.py, **/pyproject.toml, **/requirements.txt, **/vercel.json"
+
 ---
 
 # Python Flask + Vercel Backend Standards
@@ -18,6 +19,7 @@ globs: "**/*.py, **/pyproject.toml, **/requirements.txt, **/vercel.json"
 ## Project Structure
 
 ### Standard Layout
+
 ```
 project/
 ├── app/
@@ -71,6 +73,7 @@ project/
 ```
 
 ### File Naming Conventions
+
 - Snake_case for all Python files: `user_service.py`, `jwt.py`
 - Models: singular nouns (`user.py`, `item.py`)
 - Schemas: match model names (`user.py` for User schemas)
@@ -80,6 +83,7 @@ project/
 ## Python Conventions
 
 ### Type Hints (Required)
+
 ```python
 # ✅ DO: Type all functions
 def get_user_by_id(user_id: int) -> User | None:
@@ -97,6 +101,7 @@ def get_user_by_id(user_id):
 ```
 
 ### String Formatting
+
 ```python
 # ✅ DO: f-strings
 message = f"User {user.name} created successfully"
@@ -107,6 +112,7 @@ message = "User {} created".format(user.name)
 ```
 
 ### Imports
+
 ```python
 # ✅ DO: Organized imports (stdlib, third-party, local)
 from __future__ import annotations
@@ -123,6 +129,7 @@ from app.schemas.user import UserCreate, UserResponse
 ```
 
 ### Constants
+
 ```python
 # ✅ DO: Module-level constants in UPPER_SNAKE_CASE
 MAX_PAGE_SIZE = 100
@@ -133,6 +140,7 @@ TOKEN_EXPIRY_HOURS = 24
 ## Flask Patterns
 
 ### Application Factory
+
 ```python
 # app/__init__.py
 from flask import Flask
@@ -172,6 +180,7 @@ def _register_blueprints(app: Flask) -> None:
 ```
 
 ### Configuration
+
 ```python
 # app/config.py
 import os
@@ -210,6 +219,7 @@ config = {
 ```
 
 ### Vercel Entrypoint
+
 ```python
 # app.py (Vercel entrypoint)
 from app import create_app
@@ -218,6 +228,7 @@ app = create_app("production")
 ```
 
 ### Blueprint Registration
+
 ```python
 # app/api/v1/__init__.py
 from flask import Blueprint
@@ -229,6 +240,7 @@ from app.api.v1 import auth, users, items  # noqa: E402, F401
 ```
 
 ### Route Patterns
+
 ```python
 # app/api/v1/users.py
 from flask import jsonify, request
@@ -291,6 +303,7 @@ def delete_user(user_id: int):
 ```
 
 ### Health Check
+
 ```python
 # app/api/health.py
 from flask import Blueprint, jsonify
@@ -316,6 +329,7 @@ def readiness_check():
 ## Pydantic Schemas
 
 ### Request/Response Schemas
+
 ```python
 # app/schemas/user.py
 from __future__ import annotations
@@ -345,6 +359,7 @@ class UserResponse(BaseModel):
 ```
 
 ### Common Schemas
+
 ```python
 # app/schemas/common.py
 from pydantic import BaseModel, Field
@@ -368,6 +383,7 @@ class ErrorResponse(BaseModel):
 ## SQLAlchemy Models
 
 ### Base Model
+
 ```python
 # app/models/base.py
 from datetime import datetime, UTC
@@ -385,6 +401,7 @@ class TimestampMixin:
 ```
 
 ### Model Pattern
+
 ```python
 # app/models/user.py
 from app.extensions import db
@@ -406,6 +423,7 @@ class User(TimestampMixin, db.Model):
 ## Service Layer
 
 ### Service Pattern
+
 ```python
 # app/services/user_service.py
 from app.extensions import db
@@ -477,6 +495,7 @@ class UserService:
 ## Authentication
 
 ### JWT Pattern
+
 ```python
 # app/auth/jwt.py
 import jwt
@@ -496,6 +515,7 @@ def decode_token(token: str) -> dict:
 ```
 
 ### Auth Decorators
+
 ```python
 # app/auth/decorators.py
 from functools import wraps
@@ -522,6 +542,7 @@ def require_auth(f):
 ## Error Handling
 
 ### Standardized Errors
+
 ```python
 # app/errors.py
 from flask import Flask, jsonify
@@ -564,6 +585,7 @@ def register_error_handlers(app: Flask) -> None:
 ## Testing
 
 ### Pytest Configuration
+
 ```python
 # tests/conftest.py
 import pytest
@@ -611,6 +633,7 @@ def auth_headers(client):
 ```
 
 ### Test Pattern
+
 ```python
 # tests/test_users.py
 def test_create_user(client, db):
@@ -654,6 +677,7 @@ def test_get_user(client, db, auth_headers):
 ## Vercel Deployment
 
 ### pyproject.toml
+
 ```toml
 [project]
 name = "my-flask-api"
@@ -702,6 +726,7 @@ python_files = ["test_*.py"]
 ```
 
 ### Environment Variables
+
 ```bash
 # .env.example
 # Flask
@@ -719,6 +744,7 @@ RATELIMIT_STORAGE_URI=memory://
 ```
 
 ### Pre-deployment Checklist
+
 - [ ] `requirements.txt` is up to date (or dependencies in `pyproject.toml`)
 - [ ] Entrypoint (`app.py`) exports `app` instance
 - [ ] All secrets in environment variables (not hardcoded)
@@ -732,23 +758,27 @@ RATELIMIT_STORAGE_URI=memory://
 ## Performance Best Practices
 
 ### Response Times
+
 - Target: < 200ms for simple CRUD
 - Target: < 500ms for complex queries
 - Target: < 1s for aggregate operations
 
 ### Cold Start Optimization
+
 - Minimize top-level imports
 - Use lightweight dependencies
 - Lazy-load heavy modules
 - Keep bundle size small (< 50MB ideal)
 
 ### Database Performance
+
 - Use indexes on frequently queried columns
 - Avoid N+1 queries (use `joinedload`)
 - Use pagination for list endpoints
 - Configure connection pooling for serverless
 
 ### Caching
+
 ```python
 # Use flask-caching for response caching
 from flask_caching import Cache
@@ -776,6 +806,7 @@ def get_stats():
 ## Linting & Formatting
 
 ### Ruff (Recommended)
+
 ```bash
 # Lint
 ruff check .
@@ -788,12 +819,14 @@ ruff check --fix .
 ```
 
 ### Mypy
+
 ```bash
 # Type check
 mypy app/
 ```
 
 ### Pre-commit
+
 ```yaml
 # .pre-commit-config.yaml
 repos:
@@ -813,11 +846,13 @@ repos:
 ## Anti-Patterns
 
 ### ❌ DON'T: Global app object
+
 ```python
 app = Flask(__name__)  # Global, hard to test
 ```
 
 ### ✅ DO: Application factory
+
 ```python
 def create_app(config="default"):
     app = Flask(__name__)
@@ -825,6 +860,7 @@ def create_app(config="default"):
 ```
 
 ### ❌ DON'T: Business logic in routes
+
 ```python
 @app.route("/users", methods=["POST"])
 def create_user():
@@ -832,6 +868,7 @@ def create_user():
 ```
 
 ### ✅ DO: Service layer
+
 ```python
 @api_bp.route("/users", methods=["POST"])
 def create_user():
@@ -841,22 +878,26 @@ def create_user():
 ```
 
 ### ❌ DON'T: Skip input validation
+
 ```python
 data = request.get_json()
 user = User(email=data["email"])  # No validation!
 ```
 
 ### ✅ DO: Pydantic validation
+
 ```python
 data = UserCreate.model_validate(request.get_json())  # Validates!
 ```
 
 ### ❌ DON'T: Hardcode secrets
+
 ```python
 SECRET_KEY = "my-super-secret-key"
 ```
 
 ### ✅ DO: Environment variables
+
 ```python
 SECRET_KEY = os.environ.get("SECRET_KEY")
 ```
